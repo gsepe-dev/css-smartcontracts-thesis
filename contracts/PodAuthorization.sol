@@ -1,80 +1,113 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "./AuthorizationHistory.sol";
+/// @title Hash-Based Ricardian Authorization for Solid Pods
+/// @notice Manages granular consent using contractHash as central anchor
 
-/// @title Ricardian Authorization for Solid Pods
-/// @notice Manages app-to-pod access using hashed Ricardian contracts
 contract PodAuthorization {
     address public owner;
 
     struct Authorization {
         string appId;
-        string contractHash; // SHA-256 hash of Ricardian contract
         uint256 validUntil;
         bool granted;
     }
 
+    struct AuthEvent {
+        string action;
+        string contractHash;
+        uint256 timestamp;
+    }
+
+    // Core mapping: user => contractHash => Authorization
     mapping(address => mapping(string => Authorization)) public authorizations;
 
-    AuthorizationHistory public historyContract;
+    // Consent history: user => AuthEvent[]
+    mapping(address => AuthEvent[]) private userHistory;
 
-    event AuthorizationGranted(address indexed user, string appId, string contractHash, uint256 validUntil);
-    event AuthorizationRevoked(address indexed user, string appId);
+    event AuthorizationUpdated(
+        address indexed user,
+        string action,
+        string contractHash,
+        uint256 timestamp
+    );
 
     modifier onlyOwner() {
-        require(msg.sender == owner, "Only admin can perform this action");
+        require(msg.sender == owner, "Only owner can perform this action");
         _;
     }
 
-    constructor(address _historyContractAddress) {
+    constructor() {
         owner = msg.sender;
-        historyContract = AuthorizationHistory(_historyContractAddress);
     }
 
-    /// @notice App grant access by submitting contract hash and expiry
-    /// @param _appId Unique identifier of the app
-    /// @param _contractHash Hash of the Ricardian contract (SHA-256)
-    /// @param _validUntil Expiry timestamp of the authorization
-    function grantAuthorization(string calldata _appId, string calldata _contractHash, uint256 _validUntil) external {
+    /// @notice Grant access to a Ricardian contract
+    function grantAuthorization(
+        string calldata _contractHash,
+        string calldata _appId,
+        uint256 _validUntil
+    ) external {
         require(_validUntil > block.timestamp, "Authorization must be in the future");
-        authorizations[msg.sender][_appId] = Authorization(_appId, _contractHash, _validUntil, true);
-        emit AuthorizationGranted(msg.sender, _appId, _contractHash, _validUntil);
-        historyContract.logAuthorization(msg.sender, _appId, "grant", _contractHash, block.timestamp);
+
+        authorizations[msg.sender][_contractHash] = Authorization({
+            appId: _appId,
+            validUntil: _validUntil,
+            granted: true
+        });
+
+        logAuthorizationInternal(msg.sender, "grant", _contractHash);
     }
 
-    /// @notice User revokes access for a specific app
-    function revokeAuthorization(string calldata _appId) external {
-        require(authorizations[msg.sender][_appId].granted, "No active authorization for this app");
-        delete authorizations[msg.sender][_appId];
-        emit AuthorizationRevoked(msg.sender, _appId);
-        historyContract.logAuthorization(msg.sender, _appId, "revoke", "", block.timestamp);
+    /// @notice Revoke access for a specific Ricardian contract
+    function revokeAuthorization(string calldata _contractHash) external {
+        require(authorizations[msg.sender][_contractHash].granted, "No active authorization");
+
+        delete authorizations[msg.sender][_contractHash];
+
+        logAuthorizationInternal(msg.sender, "revoke", _contractHash);
     }
 
-    /// @notice Verifies if a user has valid authorization for a specific app
-    /// @param _user Address of the user
-    /// @param _appId Identifier of the app
-    /// @return True if authorization is active and not expired
-    function isAuthorized(address _user, string calldata _appId) external view returns (bool) {
-        Authorization memory auth = authorizations[_user][_appId];
+    /// @notice Check if a user has valid authorization
+    function isAuthorized(address _user, string calldata _contractHash) external view returns (bool) {
+        Authorization memory auth = authorizations[_user][_contractHash];
         return auth.granted && block.timestamp <= auth.validUntil;
     }
 
-    /// @param _user Address of the user
-    /// @param _appId Identifier of the app
-    function getAuthorizationDetails(address _user, string calldata _appId) external view returns (
-        string memory appId,
-        string memory contractHash,
-        uint256 validUntil,
-        bool granted
-    ) {
-        Authorization memory auth = authorizations[_user][_appId];
-        return (auth.appId, auth.contractHash, auth.validUntil, auth.granted);
+    /// @notice View full metadata for a given contract
+    function getAuthorizationDetails(address _user, string calldata _contractHash)
+        external
+        view
+        returns (
+            string memory appId,
+            uint256 validUntil,
+            bool granted
+        )
+    {
+        Authorization memory auth = authorizations[_user][_contractHash];
+        return (auth.appId, auth.validUntil, auth.granted);
     }
 
-    // Optional: allow updating the history contract address securely
-    function updateHistoryContract(address _newAddress) external onlyOwner {
-        historyContract = AuthorizationHistory(_newAddress);
+    /// @notice Retrieve full history of grant/revoke events
+    function getUserHistory(address _user)
+        external
+        view
+        returns (AuthEvent[] memory)
+    {
+        return userHistory[_user];
     }
 
+    /// @dev Internal logging for all authorization changes
+    function logAuthorizationInternal(
+        address _user,
+        string memory _action,
+        string memory _contractHash
+    ) internal {
+        userHistory[_user].push(AuthEvent({
+            action: _action,
+            contractHash: _contractHash,
+            timestamp: block.timestamp
+        }));
+
+        emit AuthorizationUpdated(_user, _action, _contractHash, block.timestamp);
+    }
 }
