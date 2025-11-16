@@ -9,6 +9,7 @@ contract PodAuthorization {
 
     struct Authorization {
         string appId;
+        string appName;
         uint256 validUntil;
         bool granted;
     }
@@ -17,6 +18,8 @@ contract PodAuthorization {
         string action;
         string contractHash;
         uint256 timestamp;
+        string appId;
+        string appName;
     }
 
     // Core mapping: user => contractHash => Authorization
@@ -45,26 +48,29 @@ contract PodAuthorization {
     function grantAuthorization(
         string calldata _contractHash,
         string calldata _appId,
+        string calldata _appName,
         uint256 _validUntil
     ) external {
         require(_validUntil > block.timestamp, "Authorization must be in the future");
 
         authorizations[msg.sender][_contractHash] = Authorization({
             appId: _appId,
+            appName: _appName,
             validUntil: _validUntil,
             granted: true
         });
 
-        logAuthorizationInternal(msg.sender, "grant", _contractHash);
+        logAuthorizationInternal(msg.sender, "grant", _contractHash, _appId, _appName);
     }
 
     /// @notice Revoke access for a specific Ricardian contract
     function revokeAuthorization(string calldata _contractHash) external {
-        require(authorizations[msg.sender][_contractHash].granted, "No active authorization");
+        Authorization memory auth = authorizations[msg.sender][_contractHash];
+        require(auth.granted, "No active authorization");
+
+        logAuthorizationInternal(msg.sender, "revoke", _contractHash, auth.appId, auth.appName);
 
         delete authorizations[msg.sender][_contractHash];
-
-        logAuthorizationInternal(msg.sender, "revoke", _contractHash);
     }
 
     /// @notice Check if a user has valid authorization
@@ -79,12 +85,13 @@ contract PodAuthorization {
         view
         returns (
             string memory appId,
+            string memory appName,
             uint256 validUntil,
             bool granted
         )
     {
         Authorization memory auth = authorizations[_user][_contractHash];
-        return (auth.appId, auth.validUntil, auth.granted);
+        return (auth.appId, auth.appName, auth.validUntil, auth.granted);
     }
 
     /// @notice Retrieve full history of grant/revoke events
@@ -100,12 +107,16 @@ contract PodAuthorization {
     function logAuthorizationInternal(
         address _user,
         string memory _action,
-        string memory _contractHash
+        string memory _contractHash,
+        string memory _appId,
+        string memory _appName
     ) internal {
         userHistory[_user].push(AuthEvent({
             action: _action,
             contractHash: _contractHash,
-            timestamp: block.timestamp
+            timestamp: block.timestamp,
+            appId: _appId,
+            appName: _appName
         }));
 
         emit AuthorizationUpdated(_user, _action, _contractHash, block.timestamp);
