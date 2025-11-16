@@ -7,6 +7,7 @@ describe("PodAuthorization", function () {
   let user: any;
   const contractHash = "hash_123";
   const appId = "app_xyz";
+  const appName = "MY_APP";
   const futureTime = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
 
   beforeEach(async () => {
@@ -17,7 +18,7 @@ describe("PodAuthorization", function () {
   });
 
   it("should grant authorization and emit event", async () => {
-    const tx = await podAuth.connect(user).grantAuthorization(contractHash, appId, futureTime);
+    const tx = await podAuth.connect(user).grantAuthorization(contractHash, appId, appName, futureTime);
     const receipt = await tx.wait();
 
     const event = receipt.logs
@@ -40,7 +41,7 @@ describe("PodAuthorization", function () {
   });
 
   it("should revoke authorization and emit event", async () => {
-    await podAuth.connect(user).grantAuthorization(contractHash, appId, futureTime);
+    await podAuth.connect(user).grantAuthorization(contractHash, appId, appName, futureTime);
     const tx = await podAuth.connect(user).revokeAuthorization(contractHash);
     const receipt = await tx.wait();
 
@@ -63,7 +64,7 @@ describe("PodAuthorization", function () {
   });
 
   it("should return correct authorization details", async () => {
-    await podAuth.connect(user).grantAuthorization(contractHash, appId, futureTime);
+    await podAuth.connect(user).grantAuthorization(contractHash, appId, appName, futureTime);
     const details = await podAuth.getAuthorizationDetails(await user.getAddress(), contractHash);
 
     expect(details.appId).to.equal(appId);
@@ -74,7 +75,7 @@ describe("PodAuthorization", function () {
   it("should handle expired authorization", async () => {
     const pastTime = Math.floor(Date.now() / 1000) - 100;
     await expect(
-      podAuth.connect(user).grantAuthorization(contractHash, appId, pastTime)
+      podAuth.connect(user).grantAuthorization(contractHash, appId, appName, pastTime)
     ).to.be.revertedWith("Authorization must be in the future");
   });
 
@@ -85,7 +86,7 @@ describe("PodAuthorization", function () {
   });
 
   it("should log events to user history", async () => {
-    await podAuth.connect(user).grantAuthorization(contractHash, appId, futureTime);
+    await podAuth.connect(user).grantAuthorization(contractHash, appId, appName, futureTime);
     await podAuth.connect(user).revokeAuthorization(contractHash);
 
     const history = await podAuth.getUserHistory(await user.getAddress());
